@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const authRoutes = require("./routes/authRoutes");
+app.use("/api/auth", authRoutes); 
+
+// Test route check karne ke liye
+app.get("/", (req, res) => res.send("Chat Server is Running..."));
 
 // 🔐 REGISTER
 router.post('/register', async (req, res) => {
