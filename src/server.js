@@ -3,10 +3,10 @@ const http = require("http");
 const socketIo = require("socket.io");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
-// const connectDB = require("./db");
 const User = require("./models/User");
 const Message = require("./models/Message");
 const connectDB = require("./config/database");
+const authRoutes = require("./routes/authRoutes"); // Route import
 require("dotenv").config();
 
 const app = express();
@@ -17,93 +17,54 @@ const io = socketIo(server, {
 
 app.use(cors());
 app.use(express.json());
+
+// Database Connection
 connectDB();
 
-// --- Socket.io Authentication Middleware ---
+// 🔴 ROUTES CONNECTION (Sahi jagah)
+app.use("/api/auth", authRoutes);
+
+app.get("/", (req, res) => {
+    res.send("Chat Server is Running Successfully!");
+});
+
+// --- Socket.io Middleware ---
 io.use(async (socket, next) => {
     try {
         const token = socket.handshake.auth.token;
-        if (!token) return next(new Error("Auth error: Token missing"));
-
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (!token) return next(new Error("Auth error"));
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
         const user = await User.findById(decoded.id);
-        
         if (user) {
-            socket.user = user; // Socket ke andar user data save kar liya
+            socket.user = user;
             next();
         } else {
-            next(new Error("Auth error: User not found"));
+            next(new Error("User not found"));
         }
     } catch (err) {
-        next(new Error("Auth error: Invalid Token"));
+        next(new Error("Invalid Token"));
     }
 });
 
-io.on("connection", async (socket) => {
-    const userId = socket.user._id.toString();
+io.on("connection", (socket) => {
     console.log(`⚡ Connected: ${socket.user.name}`);
-
-    // 1. User ko online mark karein
-    await User.findByIdAndUpdate(userId, { isOnline: true, socketId: socket.id });
-    io.emit("user-status", { userId, status: "online" });
-
-    // 2. Private Message bhejna
+    
     socket.on("send-message", async ({ to, content }) => {
-        try {
-            const newMessage = new Message({ sender: userId, receiver: to, content });
-            await newMessage.save();
-
-            const recipient = await User.findById(to);
-            if (recipient && recipient.socketId) {
-                // Real-time delivery
-                io.to(recipient.socketId).emit("new-message", {
-                    senderId: userId,
-                    content,
-                    timestamp: newMessage.createdAt
-                });
-            }
-        } catch (error) {
-            console.log("Msg Error:", error.message);
+        const newMessage = new Message({ sender: socket.user._id, receiver: to, content });
+        await newMessage.save();
+        const recipient = await User.findById(to);
+        if (recipient && recipient.socketId) {
+            io.to(recipient.socketId).emit("new-message", {
+                senderId: socket.user._id,
+                content
+            });
         }
     });
 
-    // 3. Typing Indicator (istyping show karna)
-    socket.on("typing", ({ to, isTyping }) => {
-        User.findById(to).then(recipient => {
-            if (recipient && recipient.socketId) {
-                io.to(recipient.socketId).emit("display-typing", {
-                    from: userId,
-                    isTyping
-                });
-            }
-        });
+    socket.on("disconnect", () => {
+        console.log("❌ User disconnected");
     });
-
-    // 4. Disconnect (Offline status)
-    socket.on("disconnect", async () => {
-        await User.findByIdAndUpdate(userId, { 
-            isOnline: false, 
-            lastSeen: new Date(), 
-            socketId: null 
-        });
-        io.emit("user-status", { userId, status: "offline" });
-        console.log(`❌ Disconnected: ${socket.user.name}`);
-    });
-});
-
-// API Route for message history
-app.get("/api/messages/:otherId", async (req, res) => {
-    // Note: Isme authentication middleware add karein
-    const { otherId } = req.params;
-    const myId = req.query.myId; // Frontend se bhejien
-    const history = await Message.find({
-        $or: [
-            { sender: myId, receiver: otherId },
-            { sender: otherId, receiver: myId }
-        ]
-    }).sort({ createdAt: 1 });
-    res.json(history);
 });
 
 const PORT = process.env.PORT || 4000;
-server.listen(PORT, () => console.log(`🚀 Chat Server live on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Server live on port ${PORT}`));
