@@ -1,107 +1,31 @@
 const express = require("express");
 const router = express.Router();
-const Message = require("../models/Message");
+
+const authMiddleware = require("../middleware/authMiddleware");
 const User = require("../models/User");
-const auth = require("../middleware/auth");
+const Message = require("../models/Message");
 
-// 💬 GET MESSAGES BETWEEN TWO USERS
-router.get("/messages/:receiverId", auth, async (req, res) => {
-  try {
-    const senderId = req.user._id;
-    const { receiverId } = req.params;
-    
-    const messages = await Message.find({
-      $or: [
-        { sender: senderId, receiver: receiverId },
-        { sender: receiverId, receiver: senderId }
-      ]
-    })
-    .sort({ createdAt: 1 })
-    .populate('sender', 'name phone profilePic')
-    .populate('receiver', 'name phone profilePic');
-    
-    res.json({
-      success: true,
-      messages,
-      count: messages.length
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
+// 🔐 Get users (same project only)
+router.get("/users", authMiddleware, async (req, res) => {
+  const users = await User.find({
+    projectId: req.user.projectId,
+    _id: { $ne: req.user._id }
+  });
+
+  res.json(users);
 });
 
-// 📨 SEND MESSAGE (REST API backup)
-router.post("/send", auth, async (req, res) => {
-  try {
-    const { receiverId, content } = req.body;
-    const senderId = req.user._id;
-    
-    // Create message
-    const message = new Message({
-      sender: senderId,
-      receiver: receiverId,
-      content,
-      isDelivered: false,
-      isRead: false
-    });
-    
-    await message.save();
-    
-    // Populate user info
-    await message.populate([
-      { path: 'sender', select: 'name phone profilePic' },
-      { path: 'receiver', select: 'name phone profilePic' }
-    ]);
-    
-    res.json({
-      success: true,
-      message: 'Message sent successfully',
-      data: message
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
+// 🔐 Get chat messages
+router.get("/messages/:userId", authMiddleware, async (req, res) => {
+  const messages = await Message.find({
+    projectId: req.user.projectId,
+    $or: [
+      { sender: req.user._id, receiver: req.params.userId },
+      { sender: req.params.userId, receiver: req.user._id }
+    ]
+  }).sort({ createdAt: 1 });
 
-// ✅ MARK AS READ
-router.post("/mark-read", auth, async (req, res) => {
-  try {
-    const { senderId, messageIds } = req.body;
-    const receiverId = req.user._id;
-    
-    // Update messages as read
-    await Message.updateMany(
-      {
-        sender: senderId,
-        receiver: receiverId,
-        isRead: false,
-        ...(messageIds && { _id: { $in: messageIds } })
-      },
-      {
-        isRead: true,
-        readAt: new Date()
-      }
-    );
-    
-    res.json({
-      success: true,
-      message: 'Messages marked as read'
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
+  res.json(messages);
 });
 
 module.exports = router;
