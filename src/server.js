@@ -299,28 +299,40 @@ const Message = mongoose.model("Message", new mongoose.Schema({
     timestamp: { type: Date, default: Date.now }
 }));
 
-// 3. Middleware Fix (Naam ko Unknown hone se bachane ke liye)
 io.use(async (socket, next) => {
     try {
         const token = socket.handshake.auth.token;
-        const userData = socket.handshake.auth.userData;
+        const userData = socket.handshake.auth.userData; // Frontend se bheja data
 
         if (!token) return next(new Error("Token missing"));
         const decoded = jwt.decode(token);
         const userId = decoded.id || decoded._id;
 
-        // ✅ SIRF socketId aur online status update karein
-        let updateObj = { socketId: socket.id, online: true };
+        // 1. Pehle check karo kya user DB mein pehle se hai
+        const existingUser = await User.findById(userId);
 
-        // ✅ AGAR frontend se naam aaya hai, tabhi name update karein
+        // 2. Sirf tabhi update karo jab naya data mil raha ho
+        let updateData = { 
+            socketId: socket.id, 
+            online: true 
+        };
+
+        // Agar frontend se asli naam aaya hai toh usey le lo
         if (userData && userData.name && userData.name !== "Unknown") {
-            updateObj.name = userData.name;
-            updateObj.mobile_no = userData.mobile_no;
+            updateData.name = userData.name;
+            updateData.mobile_no = userData.mobile_no;
+        } 
+        // Agar naam nahi aaya par DB mein pehle se naam hai, toh purana rehne do
+        else if (existingUser && existingUser.name) {
+            // Kuch mat badlo, purana naam safe rahega
+        } 
+        else {
+            updateData.name = "Unknown"; // Sirf ek dum naye user ke liye
         }
 
         const user = await User.findOneAndUpdate(
             { _id: userId },
-            { $set: updateObj },
+            { $set: updateData },
             { upsert: true, new: true }
         );
 
